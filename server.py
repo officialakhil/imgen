@@ -9,11 +9,10 @@ import os
 import threading
 import traceback
 
-import rethinkdb as r
 from flask import Flask, render_template, request, g, jsonify, make_response
 
 from dashboard import dash
-from utils.db import get_db, get_redis
+from utils.db import  get_db, get_redis
 from utils.ratelimits import ratelimit, endpoint_ratelimit
 from utils.exceptions import BadRequest
 
@@ -60,19 +59,20 @@ def init_app():
 
 def require_authorization(func):
     def wrapper(*args, **kwargs):
-        if r.table('keys').get(request.headers.get('authorization', '')).coerce_to('bool').default(False).run(get_db()):
+        key = request.headers.get('authorization','')
+        db = get_db().imgen
+        record = db.keys.find_one({'_id': key})
+        if record:
             return func(*args, **kwargs)
-
         return jsonify({'status': 401, 'error': 'You are not authorized to access this endpoint'}), 401
-
     return wrapper
 
 
 @app.teardown_appcontext
 def close_db(error):
     """Closes the database again at the end of the request."""
-    if hasattr(g, 'rdb'):
-        g.rdb.close()
+    if hasattr(g, 'mongo'):
+        g.mongo.close()
 
 
 @app.route('/')

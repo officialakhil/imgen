@@ -1,8 +1,9 @@
 import hashlib
 import json
 from random import randint
+from datetime import datetime
+import secrets
 
-import rethinkdb as r
 from flask import render_template, request, Blueprint, url_for, session, redirect
 
 from utils.db import get_db
@@ -66,7 +67,8 @@ def callback():
 def dashboard():
     user = session['user']
     is_admin = user['id'] in config['admins']
-    keys = r.table('keys').filter(r.row['owner'] == user['id']).run(get_db())
+    db = get_db().imgen
+    keys = db.keys.find({'owner': user['id']})
     return render_template('dashboard.html', name=user['username'], keys=keys, admin=is_admin, active_dash='nav-active')
 
 
@@ -93,8 +95,8 @@ def request_key():
             return render_template('result.html', result=result, success=False)
         if not link.startswith('http'):
             return render_template('result.html', result='URL must use HTTP(S) scheme!', success=False)
-
-        r.table('applications').insert({
+        data = {
+            "_id": secrets.token_hex(10),
             "owner": user['id'],
             "email": user['email'],
             "name": name,
@@ -105,8 +107,10 @@ def request_key():
             "email_consent": consent,
             "owner_name": f'{user["username"]}#{user["discriminator"]}',
             "reason": reason,
-            "time": r.now()
-        }).run(get_db())
+            "time": datetime.now()
+        }
+        db = get_db().imgen
+        db.applications.insert_one(data)
         result = 'Application Submitted 👌'
         return render_template('result.html', result=result, success=True)
 
@@ -131,9 +135,8 @@ def create_key():
         if not token or not name or not owner or not owner_name or not email:
             result = 'Please fill in all required inputs'
             return render_template('result.html', result=result, success=False)
-
-        r.table('keys').insert({
-            "id": token,
+        data = {
+            "_id": token,
             "name": name,
             "owner": owner,
             "owner_name": owner_name,
@@ -142,7 +145,9 @@ def create_key():
             "usages": {},
             "unlimited": False,
             "ratelimit_reached": 0
-        }).run(get_db())
+        }
+        db = get_db().imgen
+        db.keys.insert_one(data)
         result = 'Key Created 👌'
         return render_template('result.html', result=result, success=True)
 
@@ -155,21 +160,22 @@ def admin():
     if user['id'] not in config['admins']:
         return render_template('gitout.html')
     sort = request.args.get('sort', 'age')
+    db = get_db().imgen
     if sort == 'age_asc':
-        keys = r.table('keys').order_by(r.asc('creation_time')).run(get_db())
+        keys = db.keys.find().sort("creation_time")
     elif sort == 'age_desc':
-        keys = r.table('keys').order_by(r.desc('creation_time')).run(get_db())
+        keys = keys = db.keys.find().sort("creation_time",-1)
     elif sort == 'usage_asc':
-        keys = r.table('keys').order_by(r.asc('total_usage')).run(get_db())
+        keys = db.keys.find().sort("total_usage")
     elif sort == 'usage_desc':
-        keys = r.table('keys').order_by(r.desc('total_usage')).run(get_db())
+        keys = db.keys.find().sort("total_usage",-1)
     elif sort == 'accept_asc':
-        keys = r.table('keys').order_by(r.asc('acceptance_time')).run(get_db())
+        keys = db.keys.find().sort("acceptance_time")
     elif sort == 'accept_desc':
-        keys = r.table('keys').order_by(r.desc('acceptance_time')).run(get_db())
+        keys = db.keys.find().sort("acceptance_time", -1)
     else:
-        keys = r.table('keys').order_by(r.asc('creation_time')).run(get_db())
-    apps = r.table('applications').order_by('time').run(get_db())
+        keys = db.keys.find().sort("creation_time")
+    apps = db.applications.find().sort("time")
     return render_template('admin.html', name=user['username'], apps=apps, keys=keys, sort=sort)
 
 
@@ -177,16 +183,16 @@ def admin():
 @limited_access
 def view(key_id):
     user = session['user']
-
+    print(key_id)
     if user['id'] in config['admins']:
         admin = True
     else:
         admin = False
-
-    key = r.table('applications').get(key_id).run(get_db())
+    db = get_db().imgen
+    key = db.applications.find_one({"_id": key_id})
     key_type = 'app'
     if not key:
-        key = r.table('keys').get(key_id).run(get_db())
+        key = db.keys.find_one({"_id": key_id})
         key_type = 'key'
     if key['owner'] == user['id'] or admin:
         return render_template('app.html', key=key, key_type=key_type, admin=admin)
@@ -201,14 +207,14 @@ def approve(key_id):
 
     if user['id'] not in config['admins']:
         return render_template('gitout.html')
-
-    key = r.table('applications').get(key_id).run(get_db())
+    db = get_db().imgen
+    key = db.applications.find_one({"_id": key_id})
     m = hashlib.sha256()
-    m.update(key['id'].encode())
+    m.update(str(key['_id']).encode())
     m.update(str(randint(10000, 99999)).encode())
     token = m.hexdigest()
-    r.table('keys').insert({
-        "id": token,
+    data = {
+        "_id": token,
         "name": key['name'],
         "owner": key['owner'],
         "owner_name": key['owner_name'],
@@ -219,13 +225,14 @@ def approve(key_id):
         "link": key.get('link', 'Not Available'),
         "type": key.get('type', 'Unknown'),
         "creation_time": key.get('time', 0),
-        "acceptance_time": r.now(),
+        "acceptance_time": datetime.now(),
         "total_usage": 0,
         "usages": {},
         "unlimited": False,
         "ratelimit_reached": 0
-    }).run(get_db())
-    r.table('applications').get(key_id).delete().run(get_db())
+    }
+    db.keys.insert_one(data)
+    db.applications.delete_one({"_id": key_id})
     return redirect(url_for('.admin'))
 
 
@@ -236,8 +243,8 @@ def decline(key_id):
 
     if user['id'] not in config['admins']:
         return render_template('gitout.html')
-
-    r.table('applications').get(key_id).delete().run(get_db())
+    db = get_db().imgen
+    db.applications.delete_one({"_id": key_id})
     return redirect(url_for('.admin'))
 
 
@@ -245,12 +252,13 @@ def decline(key_id):
 @limited_access
 def delete(key_id):
     user = session['user']
-    k = r.table('keys').get(key_id).run(get_db())
+    db = get_db().imgen
+    k = db.keys.find_one({"_id": key_id})
     if user['id'] in config['admins']:
-        r.table('keys').get(key_id).delete().run(get_db())
+        db.keys.delete_one({"_id": key_id})
         return redirect(url_for('.admin'))
     elif user['id'] == k['owner']:
-        r.table('keys').get(key_id).delete().run(get_db())
+        db.keys.delete_one({"_id": key_id})
         return redirect(url_for('.dashboard'))
     else:
         return render_template('gitout.html')
@@ -263,8 +271,8 @@ def unlimited(key_id):
 
     if user['id'] not in config['admins']:
         return render_template('gitout.html')
-
-    key = r.table('keys').get(key_id).run(get_db())
+    db = get_db().imgen
+    key = db.keys.find_one({"_id": key_id})
     unlimited = not key['unlimited']
-    r.table('keys').get(key_id).update({'unlimited': unlimited}).run(get_db())
+    db.keys.update_one({"_id": key_id},{"$set": {"unlimited": unlimited}})
     return redirect(url_for('.admin'))

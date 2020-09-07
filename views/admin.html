@@ -18,9 +18,9 @@
           <h2 style="max-width: 300px; text-align: center; margin-bottom: .5rem; margin-top: .3rem;">{{ app['name'] }}</h2>
           <h5 style="text-align: center; ">Applicant: {{ app['owner_name'] }} ({{ app['owner'] }})</h5>
           <footer style="justify-content: left; margin-top: 1rem;" class="flex flex-row">
-            <a class="app-view" href="/view/{{ app['id'] }}">View</a>
-            <a class="app-approve" href="approve/{{ app['id'] }}">Approve</a>
-            <a class="app-decline" href="decline/{{ app['id'] }}">Decline</a>
+            <a class="app-view" href="/view/{{ app['_id'] }}">View</a>
+            <a class="app-approve" href="approve/{{ app['_id'] }}">Approve</a>
+            <a class="app-decline" href="decline/{{ app['_id'] }}">Decline</a>
           </footer>
         </div>
       {% endfor %}
@@ -44,13 +44,13 @@
           <h1 style="max-width: 500px; text-align: center;">{{ key['name'] }}</h1>
           <h5 style="text-align: center">Owner: {{ key['owner_name'] }} ({{ key['owner'] }})</h5>
           <div style="margin-top: 1rem;" class="flex" >
-              <a class="app-view" href="view/{{ key['id'] }}">View</a>
+              <a class="app-view" href="view/{{ key['_id'] }}">View</a>
             {% if not key['unlimited'] %}
-              <a class="unlimited" href="unlimited/{{ key['id'] }}">Make Unlimited</a>
+              <a class="unlimited" href="unlimited/{{ key['_id'] }}">Make Unlimited</a>
             {% else %}
-              <a class="unlimited" href="unlimited/{{ key['id'] }}">Make Limited</a>
+              <a class="unlimited" href="unlimited/{{ key['_id'] }}">Make Limited</a>
             {% endif %}
-            <a class="app-decline" href="delete/{{ key['id'] }}">Delete</a>
+            <a class="app-decline" href="delete/{{ key['_id'] }}">Delete</a>
           </div>
         </div>
       {% endfor %}

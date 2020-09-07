@@ -5,7 +5,6 @@ except ImportError:
 from datetime import datetime, timedelta
 from time import time
 import requests
-import rethinkdb as r
 from flask import request, make_response, jsonify
 
 from utils.db import get_db, get_redis
@@ -81,26 +80,27 @@ globalcache = RatelimitCache(expire_time=timedelta(0, 60, 0))
 def ratelimit(func, cache=globalcache, max_usage=300):
     def wrapper(*args, **kwargs):
         auth = request.headers.get('authorization', None)
-        key = r.table('keys').get(auth).run(get_db())
+        db = get_db().imgen
+        key = db.keys.find_one({"_id": auth})
         if key['unlimited']:
             return make_response(
                 (*func(*args, **kwargs), {'X-Global-RateLimit-Limit': 'Unlimited',
                                           'X-Global-RateLimit-Remaining': 'Unlimited',
                                           'X-Global-RateLimit-Reset': 2147483647}))
-        if key['id'] in cache:
-            usage = cache.get(key['id'])
+        if key['_id'] in cache:
+            usage = cache.get(key['_id'])
             if usage < max_usage:
-                cache.set(key['id'], usage + 1)
+                cache.set(key['_id'], usage + 1)
                 try:
                     return make_response((*func(*args, **kwargs),
                                           {'X-Global-RateLimit-Limit': max_usage,
                                            'X-Global-RateLimit-Remaining': max_usage - usage - 1,
-                                           'X-Global-RateLimit-Reset': cache.expires_at(key['id'])}))
+                                           'X-Global-RateLimit-Reset': cache.expires_at(key['_id'])}))
                 except TypeError:
                     return func(*args, **kwargs)
             else:
                 ratelimit_reached = key.get('ratelimit_reached', 0) + 1
-                r.table('keys').get(auth).update({"ratelimit_reached": ratelimit_reached}).run(get_db())
+                db.keys.update_one({"_id": auth}, {"$set": {"ratelimit_reached": ratelimit_reached}})
                 if ratelimit_reached % 5 == 0 and 'webhook_url' in config:
                     requests.post(config['webhook_url'],
                                   json={"embeds": [{
@@ -110,14 +110,14 @@ def ratelimit(func, cache=globalcache, max_usage=300):
                 return make_response((jsonify({'status': 429, 'error': 'You are being ratelimited', 'global': True}), 429,
                                       {'X-Global-RateLimit-Limit': max_usage,
                                        'X-Global-RateLimit-Remaining': 0,
-                                       'X-Global-RateLimit-Reset': cache.expires_at(key['id']),
-                                       'Retry-After': cache.expires_in(key['id'])}))
+                                       'X-Global-RateLimit-Reset': cache.expires_at(key['_id']),
+                                       'Retry-After': cache.expires_in(key['_id'])}))
         else:
-            cache.set(key['id'], 1)
+            cache.set(key['_id'], 1)
             try:
                 return make_response((*func(*args, **kwargs), {'X-Global-RateLimit-Limit': max_usage,
                                                                'X-Global-RateLimit-Remaining': max_usage - 1,
-                                                               'X-Global-RateLimit-Reset': cache.expires_at(key['id'])}))
+                                                               'X-Global-RateLimit-Reset': cache.expires_at(key['_id'])}))
             except TypeError:
                 return func(*args, **kwargs)
 
@@ -125,21 +125,22 @@ def ratelimit(func, cache=globalcache, max_usage=300):
 
 
 def endpoint_ratelimit(auth, cache=globalcache, max_usage=5):
-    key = r.table('keys').get(auth).run(get_db())
+    db = get_db().imgen
+    key = db.keys.find_one({"_id": auth})
     if key['unlimited']:
         return {'X-RateLimit-Limit': 'Unlimited',
                                      'X-RateLimit-Remaining': 'Unlimited',
                                      'X-RateLimit-Reset': 2147483647}
-    if key['id'] in cache:
-        usage = cache.get(key['id'])
+    if key['_id'] in cache:
+        usage = cache.get(key['_id'])
         if usage < max_usage:
-            cache.set(key['id'], usage + 1)
+            cache.set(key['_id'], usage + 1)
             return {'X-RateLimit-Limit': max_usage,
                     'X-RateLimit-Remaining': max_usage - usage - 1,
-                    'X-RateLimit-Reset': cache.expires_at(key['id'])}
+                    'X-RateLimit-Reset': cache.expires_at(key['_id'])}
         else:
             ratelimit_reached = key.get('ratelimit_reached', 0) + 1
-            r.table('keys').get(auth).update({"ratelimit_reached": ratelimit_reached}).run(get_db())
+            db.keys.update_one({"_id": auth}, {"$set": {"ratelimit_reached": ratelimit_reached}})
             if ratelimit_reached % 5 == 0 and 'webhook_url' in config:
                 requests.post(config['webhook_url'],
                               json={"embeds": [{
@@ -148,10 +149,10 @@ def endpoint_ratelimit(auth, cache=globalcache, max_usage=5):
                                                  f"Total: {ratelimit_reached}"}]})
             return {'X-RateLimit-Limit': max_usage,
                     'X-RateLimit-Remaining': -1,
-                    'X-RateLimit-Reset': cache.expires_at(key['id'],),
-                    'Retry-After': cache.expires_in(key['id'])}
+                    'X-RateLimit-Reset': cache.expires_at(key['_id'],),
+                    'Retry-After': cache.expires_in(key['_id'])}
     else:
-        cache.set(key['id'], 1)
+        cache.set(key['_id'], 1)
         return {'X-RateLimit-Limit': max_usage,
                 'X-RateLimit-Remaining': max_usage - 1,
-                'X-RateLimit-Reset': cache.expires_at(key['id'])}
+                'X-RateLimit-Reset': cache.expires_at(key['_id'])}

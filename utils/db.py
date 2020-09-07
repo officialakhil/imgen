@@ -3,16 +3,13 @@ try:
 except ImportError:
     import json
 
-import rethinkdb as r
+from pymongo import MongoClient
 import redis
 from flask import g
 
 config = json.load(open('config.json'))
 
-RDB_PASSWORD = config.get('rdb_password', '')
-RDB_ADDRESS = config['rdb_address']
-RDB_PORT = config['rdb_port']
-RDB_DB = config['rdb_db']
+MONGO_URI = config.get('mongo_uri','')
 
 REDIS_PASSWORD = config.get('redis_password', '')
 REDIS_ADDRESS = config.get('redis_address', 'localhost')
@@ -21,9 +18,9 @@ REDIS_DB = config.get('redis_db', 1)
 
 
 def get_db():
-    if 'rdb' not in g:
-        g.rdb = r.connect(RDB_ADDRESS, RDB_PORT, db=RDB_DB, password=RDB_PASSWORD)
-    return g.rdb
+    if 'mongo' not in g:
+        g.mongo = MongoClient(MONGO_URI)
+    return g.mongo
 
 
 def get_redis():
